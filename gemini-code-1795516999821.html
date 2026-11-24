@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D 極致真實運動群島 - 物理渲染與擬真排球版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.154.0/examples/jsm/",
+                "@tweenjs/tween.js": "https://unpkg.com/@tweenjs/tween.js@21.0.0/dist/tween.esm.js"
+            }
+        }
+    </script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #000; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        .ui-layer { position: absolute; z-index: 10; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <!-- 左側選單 -->
+    <div id="left-panel" class="ui-layer top-6 left-6 flex flex-col gap-4 w-72 transition-transform duration-500">
+        <div class="glass-panel rounded-2xl p-5 interactive border-t-4 border-blue-500">
+            <div class="flex justify-between items-center mb-3">
+                <h1 class="text-xl font-black text-gray-800 tracking-wide">🏅 運動發源群島</h1>
+                <button id="toggle-panel-btn" class="text-gray-500 hover:text-gray-800 transition">◀</button>
+            </div>
+            <p class="text-xs text-gray-600 mb-4 leading-relaxed">已啟動大氣散射、即時水面反射與 PBR 微表面材質渲染。請使用滑鼠拖曳旋轉，滾輪縮放。</p>
+            
+            <div class="flex flex-col gap-2">
+                <button id="mode-explore" class="bg-blue-600 text-white py-2.5 rounded-lg text-sm font-bold shadow-lg hover:bg-blue-700 transition">🔍 探索模式 (點擊島嶼)</button>
+                <button id="mode-build" class="bg-emerald-600 text-white py-2.5 rounded-lg text-sm font-bold shadow-lg hover:bg-emerald-700 transition">🔨 建造模式 (點擊草地)</button>
+                <button id="btn-tour" class="bg-purple-600 text-white py-2.5 rounded-lg text-sm font-bold shadow-lg hover:bg-purple-700 transition">✈️ 電影級導覽</button>
+            </div>
+        </div>
+
+        <div id="build-menu" class="hidden glass-panel rounded-2xl p-4 interactive border-t-4 border-emerald-500">
+            <h2 class="font-bold text-gray-800 mb-3 text-sm">創意建造工坊</h2>
+            <div class="grid grid-cols-2 gap-2">
+                <button class="build-item bg-white hover:bg-gray-50 py-2 rounded text-sm font-semibold border border-gray-200 transition" data-type="tree">🌲 橡樹</button>
+                <button class="build-item bg-white hover:bg-gray-50 py-2 rounded text-sm font-semibold border border-gray-200 transition" data-type="house">🏠 木屋</button>
+                <button class="build-item bg-white hover:bg-gray-50 py-2 rounded text-sm font-semibold border border-gray-200 transition" data-type="bench">🪑 長椅</button>
+                <button id="btn-undo" class="col-span-2 bg-red-50 text-red-600 hover:bg-red-100 py-1.5 mt-2 rounded text-sm font-bold transition">↩ 復原</button>
+            </div>
+        </div>
+    </div>
+
+    <button id="btn-expand" class="hidden ui-layer top-6 left-6 glass-panel p-3 rounded-full interactive text-blue-600 font-bold transition hover:scale-105">
+        ▶ 展開
+    </button>
+
+    <!-- 右側資訊面板 -->
+    <div id="right-panel" class="hidden ui-layer top-6 right-6 w-80 interactive transform transition-transform duration-500 translate-x-full">
+        <div class="glass-panel rounded-2xl overflow-hidden border-t-4 border-orange-500">
+            <div id="info-image" class="w-full h-48 bg-gray-200 bg-cover bg-center"></div>
+            <div class="p-5">
+                <h2 id="info-title" class="text-xl font-black text-gray-800 mb-1">島嶼名稱</h2>
+                <div class="text-xs text-gray-500 mb-3">📍 來源：<a id="info-source" href="#" target="_blank" class="text-blue-600 hover:underline">官方組織</a></div>
+                <p id="info-desc" class="text-sm text-gray-700 mb-4 leading-relaxed font-medium">簡介內容...</p>
+                <div class="bg-orange-50/80 border border-orange-100 rounded-xl p-3 mb-4">
+                    <h3 class="text-xs font-bold text-orange-800 mb-1 flex items-center gap-1">💡 趣味冷知識</h3>
+                    <p id="info-fact" class="text-xs text-orange-700 leading-relaxed">冷知識內容...</p>
+                </div>
+                <button id="btn-close-info" class="w-full bg-gray-100 text-gray-700 py-2.5 rounded-lg font-bold hover:bg-gray-200 transition">關閉面板</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="crosshair" class="hidden ui-layer top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-emerald-400 text-2xl font-light pointer-events-none drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]">
+        +
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { Sky } from 'three/addons/objects/Sky.js';
+        import * as TWEEN from '@tweenjs/tween.js';
+
+        // 8 項運動真實資料庫
+        const sportsData = [
+            { id: 'basketball', name: '籃球發源島', color: 0x3b82f6, theme: 'basketball', desc: '1891年由詹姆斯·奈史密斯發明，最初是為了在麻省的寒冬中讓學生於室內運動。', fact: '早期的籃球比賽是真的把球投進裝桃子的木籃裡，每次得分還要爬梯子撿球！', image: 'https://images.unsplash.com/photo-1542652694-40abf526446e?auto=format&fit=crop&q=80&w=600', sourceName: 'FIBA 國際籃總', sourceUrl: 'https://www.fiba.basketball/' },
+            { id: 'football', name: '足球傳奇島', color: 0x10b981, theme: 'football', desc: '全球最受歡迎的運動。現代規則於19世紀中葉在英國確立，強調足部控球戰術。', fact: '世界上最早的足球遊戲起源於中國古代的「蹴鞠」，獲FIFA官方確認。', image: 'https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&q=80&w=600', sourceName: 'FIFA 國際足總', sourceUrl: 'https://www.fifa.com/' },
+            { id: 'tennis', name: '網球大滿貫島', color: 0x8b5cf6, theme: 'tennis', desc: '起源於12世紀法國，當時用手掌擊球。16世紀發明球拍，溫布頓是最古老賽事。', fact: '網球計分法（15,30,40）源自古代時鐘的鐘面，40其實是45的簡稱。', image: 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?auto=format&fit=crop&q=80&w=600', sourceName: 'ITF 國際網總', sourceUrl: 'https://www.itftennis.com/' },
+            { id: 'baseball', name: '棒球狂熱島', color: 0xf43f5e, theme: 'baseball', desc: '被譽為美國國民運動。比賽分九局，輪流攻守，講求精準打擊與投球策略。', fact: '棒球比賽沒有時間限制，如果平手就會不斷延長，直到分出勝負為止。', image: 'https://images.unsplash.com/photo-1508344928928-7137b29de218?auto=format&fit=crop&q=80&w=600', sourceName: 'WBSC 世界棒壘總會', sourceUrl: 'https://www.wbsc.org/' },
+            { id: 'swimming', name: '游泳競技島', color: 0x0ea5e9, theme: 'swimming', desc: '人類自古具備的生存技能，1896年第一屆現代奧運就已經是正式項目。', fact: '「蝶式」並非一開始就有，是1930年代由蛙式改良而來，因速度快而獨立。', image: 'https://images.unsplash.com/photo-1530549387789-4c1002986f58?auto=format&fit=crop&q=80&w=600', sourceName: 'World Aquatics', sourceUrl: 'https://www.worldaquatics.com/' },
+            { id: 'volleyball', name: '排球扣殺島', color: 0xf59e0b, theme: 'volleyball', desc: '1895年美國人發明，結合了網球、籃球與手球元素，專為室內體育館設計。', fact: '最早的排球是用籃球的「內膽」做的，直到1900年才製作出專用排球。', image: 'https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?auto=format&fit=crop&q=80&w=600', sourceName: 'FIVB 國際排總', sourceUrl: 'https://www.fivb.com/' },
+            { id: 'golf', name: '高爾夫果嶺島', color: 0x65a30d, theme: 'golf', desc: '現代高爾夫起源於15世紀蘇格蘭，需在自然地形中用最少次數將球擊入洞。', fact: '高爾夫球表面有300-400個小凹洞，是為了減少空氣阻力讓球飛得更遠。', image: 'https://images.unsplash.com/photo-1587174486073-ae5e5cff23aa?auto=format&fit=crop&q=80&w=600', sourceName: 'IGF 國際高球總會', sourceUrl: 'https://www.igfgolf.org/' },
+            { id: 'tabletennis', name: '桌球對決島', color: 0xd946ef, theme: 'tabletennis', desc: '19世紀末英國上流社會的晚宴後娛樂，當時甚至以書本當作球網。', fact: '最早被稱為"Whiff Whaff"，後來因擊球聲音才被註冊商標為"Ping-Pong"。', image: 'https://images.unsplash.com/photo-1534158914592-062992fbe900?auto=format&fit=crop&q=80&w=600', sourceName: 'ITTF 國際桌總', sourceUrl: 'https://www.ittf.com/' }
+        ];
+
+        // 1. 核心渲染器設定
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0xd1e3f0, 0.004);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+        camera.position.set(0, 50, 90);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; controls.dampingFactor = 0.04;
+        controls.maxPolarAngle = Math.PI / 2 + 0.1;
+
+        // 2. 物理大氣天空與光線
+        const sky = new Sky();
+        sky.scale.setScalar(10000);
+        scene.add(sky);
+
+        const skyUniforms = sky.material.uniforms;
+        skyUniforms['turbidity'].value = 8;
+        skyUniforms['rayleigh'].value = 1.2;
+        skyUniforms['mieCoefficient'].value = 0.005;
+        skyUniforms['mieDirectionalG'].value = 0.8;
+
+        const sun = new THREE.Vector3();
+        const phi = THREE.MathUtils.degToRad(80);
+        const theta = THREE.MathUtils.degToRad(120); 
+        sun.setFromSphericalCoords(1, phi, theta);
+        sky.material.uniforms['sunPosition'].value.copy(sun);
+
+        const dirLight = new THREE.DirectionalLight(0xfff7e6, 3.5);
+        dirLight.position.copy(sun).multiplyScalar(100);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 4096;
+        dirLight.shadow.mapSize.height = 4096;
+        dirLight.shadow.camera.near = 10;
+        dirLight.shadow.camera.far = 300;
+        dirLight.shadow.camera.left = -60;
+        dirLight.shadow.camera.right = 60;
+        dirLight.shadow.camera.top = 60;
+        dirLight.shadow.camera.bottom = -60;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        // 3. 物理反射海面
+        function createWaterBump() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#8080ff';
+            ctx.fillRect(0,0,1024,1024);
+            for(let i=0; i<30000; i++) {
+                ctx.fillStyle = Math.random()>0.5 ? '#ffffff' : '#000000';
+                ctx.globalAlpha = 0.03;
+                ctx.beginPath();
+                ctx.arc(Math.random()*1024, Math.random()*1024, Math.random()*20+5, 0, Math.PI*2);
+                ctx.fill();
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
+            return texture;
+        }
+        const waterNormal = createWaterBump();
+
+        const waterGeo = new THREE.PlaneGeometry(1000, 1000, 1, 1);
+        const waterMat = new THREE.MeshPhysicalMaterial({
+            color: 0x05445e, metalness: 0.9, roughness: 0.1, bumpMap: waterNormal, bumpScale: 0.02, clearcoat: 1.0, clearcoatRoughness: 0.1
+        });
+        const ocean = new THREE.Mesh(waterGeo, waterMat);
+        ocean.rotation.x = -Math.PI / 2;
+        ocean.position.y = -8;
+        ocean.receiveShadow = true;
+        scene.add(ocean);
+
+        function createNoiseTexture(colorBase) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            for(let i=0; i<256; i+=2) {
+                for(let j=0; j<256; j+=2) {
+                    const c = Math.floor(colorBase + (Math.random()-0.5)*40);
+                    ctx.fillStyle = `rgb(${c},${c},${c})`;
+                    ctx.fillRect(i, j, 2, 2);
+                }
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+        const grassTex = createNoiseTexture(120);
+        const rockTex = createNoiseTexture(100);
+
+        // 4. 生成 8 座真實物理岩石島嶼與運動物件
+        const islands = [];
+        const builtObjects = [];
+        const islandRadius = 8;
+        const radiusAroundCenter = 28; 
+        
+        sportsData.forEach((data, index) => {
+            const angle = (index / sportsData.length) * Math.PI * 2;
+            const islandGroup = new THREE.Group();
+            islandGroup.position.set(Math.cos(angle) * radiusAroundCenter, (Math.random() - 0.5) * 3, Math.sin(angle) * radiusAroundCenter);
+            islandGroup.userData = { isIsland: true, data: data, originalY: islandGroup.position.y };
+
+            // 草地頂層
+            const topGeo = new THREE.CylinderGeometry(islandRadius, islandRadius - 1.5, 1.5, 32);
+            const topMat = new THREE.MeshPhysicalMaterial({ color: 0x4ade80, roughness: 1.0, map: grassTex, bumpMap: grassTex, bumpScale: 0.1 });
+            const topMesh = new THREE.Mesh(topGeo, topMat);
+            topMesh.position.y = 0.75; topMesh.castShadow = true; topMesh.receiveShadow = true;
+            islandGroup.add(topMesh);
+
+            // 分形碎岩底部
+            const bottomGeo = new THREE.CylinderGeometry(islandRadius - 1.5, 0.5, 12, 32, 6);
+            const pos = bottomGeo.attributes.position;
+            for(let i=0; i<pos.count; i++) {
+                const y = pos.getY(i);
+                if(y < 5) {
+                    const x = pos.getX(i), z = pos.getZ(i);
+                    const noise = Math.sin(x*1.5)*Math.cos(z*1.5)*0.4 + Math.sin(y*2)*0.3;
+                    pos.setX(i, x + x * noise);
+                    pos.setZ(i, z + z * noise);
+                }
+            }
+            bottomGeo.computeVertexNormals();
+            const bottomMat = new THREE.MeshPhysicalMaterial({ color: 0x6b7280, roughness: 1.0, map: rockTex, bumpMap: rockTex, bumpScale: 0.5 });
+            const bottomMesh = new THREE.Mesh(bottomGeo, bottomMat);
+            bottomMesh.position.y = -6; bottomMesh.castShadow = true; bottomMesh.receiveShadow = true;
+            islandGroup.add(bottomMesh);
+
+            // 高質感主題象徵物
+            let sportObj;
+            const commonProps = { roughness: 0.6, clearcoat: 0.5, clearcoatRoughness: 0.2 };
+            
+            if (data.theme === 'basketball') {
+                sportObj = new THREE.Mesh(new THREE.SphereGeometry(2, 64, 64), new THREE.MeshPhysicalMaterial({ color: 0xd97706, roughness: 0.8, bumpMap: rockTex, bumpScale: 0.05, clearcoat: 0.1 }));
+            } else if (data.theme === 'football') {
+                sportObj = new THREE.Mesh(new THREE.IcosahedronGeometry(2, 2), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.5, flatShading: true }));
+            } else if (data.theme === 'tennis') {
+                sportObj = new THREE.Mesh(new THREE.SphereGeometry(1.6, 32, 32), new THREE.MeshPhysicalMaterial({ color: 0xccff00, roughness: 0.9, bumpMap: grassTex, bumpScale: 0.1 }));
+            } else if (data.theme === 'baseball') {
+                sportObj = new THREE.Mesh(new THREE.SphereGeometry(1.5, 32, 32), new THREE.MeshPhysicalMaterial({ color: 0xffffff, ...commonProps }));
+            } else if (data.theme === 'swimming') {
+                sportObj = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.5, 2.5), new THREE.MeshPhysicalMaterial({ color: 0x0ea5e9, transmission: 0.9, opacity: 1, roughness: 0.0, ior: 1.4, thickness: 1.5 }));
+            } else if (data.theme === 'volleyball') {
+                // 1. 生成藍黃螺旋紋理貼圖 (模擬 Mikasa 經典拼塊)
+                const vCanvas = document.createElement('canvas');
+                vCanvas.width = 1024; vCanvas.height = 512;
+                const vCtx = vCanvas.getContext('2d');
+                
+                // 底色：經典 Mikasa 藍
+                vCtx.fillStyle = '#293B8C'; 
+                vCtx.fillRect(0, 0, 1024, 512);
+                
+                // 畫上螺旋狀的黃色區塊
+                vCtx.fillStyle = '#FFD100';
+                for (let i = 0; i < 4; i++) {
+                    let xOffset = i * 256;
+                    vCtx.beginPath();
+                    vCtx.moveTo(xOffset, 0);
+                    vCtx.bezierCurveTo(xOffset + 150, 170, xOffset - 50, 340, xOffset + 60, 512);
+                    vCtx.lineTo(xOffset + 180, 512);
+                    vCtx.bezierCurveTo(xOffset + 70, 340, xOffset + 270, 170, xOffset + 120, 0);
+                    vCtx.fill();
+                }
+                const vTex = new THREE.CanvasTexture(vCanvas);
+
+                // 2. 生成排球特有的微小凹洞表面 (Dimple Bump Map)
+                const bCanvas = document.createElement('canvas');
+                bCanvas.width = 256; bCanvas.height = 256;
+                const bCtx = bCanvas.getContext('2d');
+                bCtx.fillStyle = '#808080';
+                bCtx.fillRect(0, 0, 256, 256);
+                
+                bCtx.fillStyle = '#ffffff'; // 凹洞亮點
+                for(let k=0; k<256; k+=4) {
+                    for(let l=0; l<256; l+=4) {
+                        let offsetX = (l % 8 === 0) ? 2 : 0;
+                        bCtx.beginPath();
+                        bCtx.arc(k + offsetX, l, 1.2, 0, Math.PI*2);
+                        bCtx.fill();
+                    }
+                }
+                const bTex = new THREE.CanvasTexture(bCanvas);
+                bTex.wrapS = THREE.RepeatWrapping; 
+                bTex.wrapT = THREE.RepeatWrapping;
+                bTex.repeat.set(6, 3);
+
+                // 3. 建立高面數球體並套用物理材質
+                sportObj = new THREE.Mesh(
+                    new THREE.SphereGeometry(1.8, 64, 64),
+                    new THREE.MeshPhysicalMaterial({ 
+                        map: vTex,               // 藍黃紋理
+                        bumpMap: bTex,           // 凹洞貼圖
+                        bumpScale: 0.015,        // 凹洞深度微調
+                        roughness: 0.65,         // 皮革粗糙度
+                        clearcoat: 0.1,          // 微微的反光感
+                        clearcoatRoughness: 0.8
+                    })
+                );
+            } else if (data.theme === 'golf') {
+                sportObj = new THREE.Group();
+                const ball = new THREE.Mesh(new THREE.SphereGeometry(0.9, 32, 32), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.4, bumpMap: rockTex, bumpScale: 0.02 }));
+                const tee = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1), new THREE.MeshPhysicalMaterial({ color: 0xef4444 }));
+                tee.position.y = -0.6; sportObj.add(ball); sportObj.add(tee);
+            } else if (data.theme === 'tabletennis') {
+                sportObj = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32), new THREE.MeshPhysicalMaterial({ color: 0xd90429, roughness: 0.7 }));
+                sportObj.rotation.x = Math.PI / 2;
+            }
+            
+            if (sportObj) {
+                sportObj.position.set(0, 4, 0);
+                sportObj.castShadow = true; sportObj.receiveShadow = true;
+                sportObj.userData = { isSportItem: true, originalY: 4 };
+                islandGroup.add(sportObj);
+            }
+
+            scene.add(islandGroup);
+            islands.push(islandGroup);
+        });
+
+        // 5. UI 與鏡頭互動邏輯
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let currentMode = 'explore'; 
+        let selectedBuildType = null;
+
+        window.addEventListener('pointerdown', (e) => {
+            if (e.target.closest('.ui-layer')) return;
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            if (currentMode === 'explore') {
+                const intersects = raycaster.intersectObjects(islands, true);
+                if (intersects.length > 0) {
+                    let object = intersects[0].object;
+                    while (object.parent && !object.userData.isIsland) object = object.parent;
+                    if (object.userData.isIsland) {
+                        focusOnIsland(object);
+                        showIslandInfo(object.userData.data);
+                    }
+                }
+            } else if (currentMode === 'build' && selectedBuildType) {
+                const intersects = raycaster.intersectObjects(islands, true);
+                if (intersects.length > 0) {
+                    const hitPoint = intersects[0].point;
+                    const parentIsland = intersects[0].object.parent;
+                    if (hitPoint.y >= parentIsland.position.y + 1) buildObject(hitPoint, parentIsland, selectedBuildType);
+                }
+            }
+        });
+
+        function buildObject(position, island, type) {
+            let mesh = new THREE.Group();
+            if (type === 'tree') {
+                const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 2), new THREE.MeshPhysicalMaterial({ color: 0x4a3f35, roughness: 1 }));
+                trunk.position.y = 1; trunk.castShadow = true; mesh.add(trunk);
+                const leaves = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshPhysicalMaterial({ color: 0x166534, roughness: 0.9, flatShading: true }));
+                leaves.position.y = 2.5; leaves.castShadow = true; mesh.add(leaves);
+            } else if (type === 'house') {
+                const base = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.8, 2.5), new THREE.MeshPhysicalMaterial({ color: 0xf3f4f6, roughness: 0.9 }));
+                base.position.y = 0.9; base.castShadow = true; mesh.add(base);
+                const roof = new THREE.Mesh(new THREE.ConeGeometry(2.2, 1.5, 4), new THREE.MeshPhysicalMaterial({ color: 0xb91c1c, roughness: 0.7 }));
+                roof.position.y = 2.55; roof.rotation.y = Math.PI/4; roof.castShadow = true; mesh.add(roof);
+            } else if (type === 'bench') {
+                mesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.4, 0.6), new THREE.MeshPhysicalMaterial({ color: 0x854d0e, roughness: 0.8 }));
+                mesh.position.y = 0.2; mesh.castShadow = true;
+            }
+
+            mesh.position.copy(position);
+            mesh.scale.set(0.01, 0.01, 0.01);
+            scene.add(mesh);
+            builtObjects.push(mesh);
+            new TWEEN.Tween(mesh.scale).to({x:1, y:1, z:1}, 600).easing(TWEEN.Easing.Elastic.Out).start();
+        }
+
+        function focusOnIsland(islandGroup) {
+            const targetPos = islandGroup.position;
+            new TWEEN.Tween(camera.position).to({ x: targetPos.x * 1.3, y: targetPos.y + 10, z: targetPos.z * 1.3 }, 1500).easing(TWEEN.Easing.Cubic.InOut).start();
+            new TWEEN.Tween(controls.target).to({ x: targetPos.x, y: targetPos.y + 4, z: targetPos.z }, 1500).easing(TWEEN.Easing.Cubic.InOut).start();
+        }
+
+        function showIslandInfo(data) {
+            document.getElementById('info-title').innerText = data.name;
+            document.getElementById('info-desc').innerText = data.desc;
+            document.getElementById('info-fact').innerText = data.fact;
+            document.getElementById('info-source').innerText = data.sourceName;
+            document.getElementById('info-source').href = data.sourceUrl;
+            document.getElementById('info-image').style.backgroundImage = `url('${data.image}')`;
+            
+            const panel = document.getElementById('right-panel');
+            panel.classList.remove('hidden');
+            setTimeout(() => panel.classList.remove('translate-x-full'), 20);
+        }
+
+        document.getElementById('toggle-panel-btn').addEventListener('click', () => {
+            document.getElementById('left-panel').style.transform = 'translateX(-150%)';
+            setTimeout(() => document.getElementById('btn-expand').classList.remove('hidden'), 400);
+        });
+        document.getElementById('btn-expand').addEventListener('click', () => {
+            document.getElementById('btn-expand').classList.add('hidden');
+            document.getElementById('left-panel').style.transform = 'translateX(0)';
+        });
+        document.getElementById('btn-close-info').addEventListener('click', () => {
+            document.getElementById('right-panel').classList.add('translate-x-full');
+            setTimeout(() => document.getElementById('right-panel').classList.add('hidden'), 500);
+        });
+
+        document.getElementById('mode-explore').addEventListener('click', () => {
+            currentMode = 'explore'; document.body.style.cursor = 'default';
+            document.getElementById('build-menu').classList.add('hidden');
+            document.getElementById('crosshair').classList.add('hidden');
+        });
+        document.getElementById('mode-build').addEventListener('click', () => {
+            currentMode = 'build'; 
+            document.getElementById('build-menu').classList.remove('hidden');
+            document.getElementById('crosshair').classList.remove('hidden');
+            document.getElementById('btn-close-info').click();
+            new TWEEN.Tween(camera.position).to({ x: 0, y: 70, z: 90 }, 1500).easing(TWEEN.Easing.Cubic.InOut).start();
+            new TWEEN.Tween(controls.target).to({ x: 0, y: 0, z: 0 }, 1500).easing(TWEEN.Easing.Cubic.InOut).start();
+        });
+
+        const buildItems = document.querySelectorAll('.build-item');
+        buildItems.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                buildItems.forEach(b => b.classList.remove('border-emerald-500', 'bg-emerald-50'));
+                e.target.classList.add('border-emerald-500', 'bg-emerald-50');
+                selectedBuildType = e.target.dataset.type;
+                document.body.style.cursor = 'crosshair';
+            });
+        });
+
+        document.getElementById('btn-undo').addEventListener('click', () => {
+            if (builtObjects.length > 0) scene.remove(builtObjects.pop());
+        });
+
+        let tourActive = false;
+        document.getElementById('btn-tour').addEventListener('click', async () => {
+            if(tourActive) return; tourActive = true;
+            document.getElementById('mode-explore').click();
+            for (let i = 0; i < islands.length; i++) {
+                if (!tourActive) break;
+                focusOnIsland(islands[i]);
+                showIslandInfo(islands[i].userData.data);
+                await new Promise(r => setTimeout(r, 6000));
+            }
+            tourActive = false;
+            new TWEEN.Tween(camera.position).to({ x: 0, y: 50, z: 90 }, 2000).easing(TWEEN.Easing.Cubic.InOut).start();
+            new TWEEN.Tween(controls.target).to({ x: 0, y: 0, z: 0 }, 2000).easing(TWEEN.Easing.Cubic.InOut).start();
+            document.getElementById('btn-close-info').click();
+        });
+
+        // 6. 動畫與渲染迴圈
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+
+            TWEEN.update(); controls.update();
+
+            waterNormal.offset.x += 0.0005;
+            waterNormal.offset.y += 0.0002;
+
+            islands.forEach((island, index) => {
+                island.position.y = island.userData.originalY + Math.sin(time * 1.2 + index) * 0.5;
+                island.children.forEach(child => {
+                    if (child.userData.isSportItem) {
+                        child.rotation.y += 0.01;
+                        child.rotation.x += 0.005;
+                        child.position.y = child.userData.originalY + Math.sin(time * 2 + index) * 0.3;
+                    }
+                });
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
